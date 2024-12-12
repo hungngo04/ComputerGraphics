@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <math.h>
 
-#define VOLUME_SIZE 128
+#define VOLUME_SIZE 256
 #define IMAGE_WIDTH 512
 #define IMAGE_HEIGHT 512
 #define MAX_STEPS 256
@@ -13,6 +13,19 @@ float volume[VOLUME_SIZE][VOLUME_SIZE][VOLUME_SIZE];
 struct Point {
     float x, y, z;
 };
+
+struct Color {
+    float r, g, b, a;
+};
+
+struct Color transfer_function(float density) {
+    struct Color color;
+    color.r = density;
+    color.g = 0.0f;
+    color.b = 1.0f - density;
+    color.a = density;
+    return color;
+}
 
 int euclidian_distance(struct Point x, struct Point y) {
     return sqrt(pow(x.x - y.x, 2) + pow(x.y - y.y, 2) + pow(x.z - y.z, 2));
@@ -29,12 +42,26 @@ float sample_volume(float x, float y, float z) {
     return volume[ix][iy][iz];
 }
 
-float ray_march(float start_x, float start_y, float start_z, float dir_x, float dir_y, float dir_z) {
+struct Color ray_march(float start_x, float start_y, float start_z, float dir_x, float dir_y, float dir_z) {
     float pos_x = start_x, pos_y = start_y, pos_z = start_z;
-    float density = 0.0f;
+
+    struct Color accumulated_color = {0.0f, 0.0f, 0.0f, 0.0f};
 
     for (int step = 0; step < MAX_STEPS; ++step) {
-        density += sample_volume(pos_x, pos_y, pos_z) * STEP_SIZE;
+        float density = sample_volume(pos_x, pos_y, pos_z) * STEP_SIZE;
+
+        struct Color sample_color = transfer_function(density);
+
+        // Front-to-back compositing
+        accumulated_color.r += (1 - accumulated_color.a) * sample_color.r * sample_color.a;
+        accumulated_color.g += (1 - accumulated_color.a) * sample_color.g * sample_color.a;
+        accumulated_color.b += (1 - accumulated_color.a) * sample_color.b * sample_color.a;
+        accumulated_color.a += (1 - accumulated_color.a) * sample_color.a;
+
+        // If fully opaque 
+        if (accumulated_color.a >= 1.0f) {
+            break;
+        }
 
         pos_x += dir_x * STEP_SIZE;
         pos_y += dir_y * STEP_SIZE;
@@ -45,15 +72,13 @@ float ray_march(float start_x, float start_y, float start_z, float dir_x, float 
         }
     }
 
-    density = fmin(density, 1.0f);
-
-    return density;
+    return accumulated_color;
 }
 
-void test_ray_march() {
-    float density = ray_march(0.5f, 0.5f, -1.0f, 0.0f, 0.0f, 1.0f);
-    printf("Ray march density: %f\n", density);
-}
+// void test_ray_march() {
+//     float density = ray_march(0.5f, 0.5f, -1.0f, 0.0f, 0.0f, 1.0f);
+//     printf("Ray march density: %f\n", density);
+// }
 
 void render_image(unsigned char *image) {
     for (int y = 0; y < IMAGE_HEIGHT; y++) {
@@ -70,23 +95,22 @@ void render_image(unsigned char *image) {
             ray_dir_y /= length;
             ray_dir_z /= length;
 
-            float density = ray_march(0.5f, 0.3f, 0.0f, ray_dir_x, ray_dir_y, ray_dir_z);
+            struct Color pixel_color = ray_march(0.5f, 0.5f, 0.0f, ray_dir_x, ray_dir_y, ray_dir_z);
 
             // Map density to grayscale
-            unsigned char color = (unsigned char)(density * 255);
             int index = (y * IMAGE_WIDTH + x) * 3;
-            image[index] = color;       // R
-            image[index + 1] = color;   // G
-            image[index + 2] = color;   // B
+            image[index] = (unsigned char)(fmin(pixel_color.r, 1.0f) * 255); // R
+            image[index + 1] = (unsigned char)(fmin(pixel_color.g, 1.0f) * 255); // G
+            image[index + 2] = (unsigned char)(fmin(pixel_color.b, 1.0f) * 255); // B
         }
     }
 }
 
 void initialize_volume() {
-    int center_x = VOLUME_SIZE / 2;
-    int center_y = VOLUME_SIZE / 2;
-    int center_z = VOLUME_SIZE / 2;
-    int radius = VOLUME_SIZE / 4;
+    int center_x = VOLUME_SIZE / 2 + 10;
+    int center_y = VOLUME_SIZE / 2 + 10;
+    int center_z = VOLUME_SIZE / 2 - 20;
+    int radius = VOLUME_SIZE / 8;
 
     for (int x = 0; x < VOLUME_SIZE; ++x) {
         for (int y = 0; y < VOLUME_SIZE; ++y) {
